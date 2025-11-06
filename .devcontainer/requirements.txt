@@ -1,3 +1,0 @@
-turso-client
-streamlit
-sqlalchemy
