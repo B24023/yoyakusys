@@ -1,1 +1,3 @@
 turso-client
+streamlit
+sqlalchemy
