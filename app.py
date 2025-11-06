@@ -1,3 +1,5 @@
+from sqlalchemy import text
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time, timedelta
