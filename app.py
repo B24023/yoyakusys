@@ -1,16 +1,14 @@
-from sqlalchemy import text
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime, time, timedelta
 import time as t
+from sqlalchemy import text # <<< 修正点： この行を追加しました
 
 # --- 定数設定 ---
 START_HOUR = 9
 END_HOUR = 17
 INTERVAL_MINUTES = 30
-# データベースのテーブル名
-TABLE_NAME = 'reservations'
+TABLE_NAME = 'reservations_log' # テーブル名 (Excelファイルパスの代わり)
 
 # --- ページ設定 ---
 st.set_page_config(
@@ -22,132 +20,115 @@ st.set_page_config(
 # --- データベース接続と初期化 ---
 @st.cache_resource
 def get_db_connection():
-    """Secrets.tomlの "connections.turso" を使ってDBに接続"""
-    # st.connectionは、Secrets.tomlの[connections.turso]を自動で読み込みます
+    """Tursoデータベースへの接続を取得し、テーブルがなければ作成する"""
     conn = st.connection("turso", type="sql")
     
-    # テーブルが存在しない場合、初めての実行時にテーブルを作成する
-    # TEXT: 文字列, DATETIME: 日時
-    with conn.session as s:
-        s.execute(f"""
+    with conn.session as session:
+        # テーブルが存在しない場合のみ作成する
+        session.execute(text(f"""
             CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                reservation_target TEXT NOT NULL,
-                date TEXT NOT NULL,
-                start_time TEXT NOT NULL,
-                duration TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                予約対象 VARCHAR(255),
+                日付 VARCHAR(20),
+                開始時間 VARCHAR(10),
+                長さ VARCHAR(50),
+                予約確定日時 VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        s.commit()
-        
+        """))
+        session.commit()
     return conn
 
 # グローバルに接続を取得
 try:
     conn = get_db_connection()
 except Exception as e:
-    st.error(f"🚨 データベース接続に失敗しました。Streamlit CloudのSecrets設定を確認してください。エラー: {e}")
+    st.error(f"データベース接続に失敗しました。Streamlit Cloud の Secret 設定を確認してください。エラー: {e}")
     st.stop()
 
 
 # --- 関数: 既存予約データの読み込み ---
-@st.cache_data(ttl=5) # 5秒間はキャッシュ
+@st.cache_data(ttl=5) # 5秒間は再実行しないようにキャッシュを設定
 def load_reservations():
     """データベースから既存の予約データを読み込む"""
     try:
-        # SQLクエリで全データを取得し、pandas DataFrameに変換
-        df = conn.query(f'SELECT * FROM {TABLE_NAME}', ttl=0) # キャッシュを使わず最新を取得
+        # データベースから全データを読み込む
+        query = f"SELECT * FROM {TABLE_NAME};"
+        df = conn.query(query, ttl=0) # DB問い合わせ時はキャッシュを無効化
         
         if df.empty:
-            # 必要な列を定義した空のDataFrameを返す
-            cols = ['reservation_target', 'date', 'start_time', 'duration', 'created_at', 'start_datetime', 'end_datetime']
-            return pd.DataFrame(columns=cols)
+            # 予約がまだない場合は空のDataFrameを返す
+            return pd.DataFrame(columns=['予約対象', '日付', '開始時間', '長さ', '予約確定日時', 'start_datetime', 'end_datetime'])
 
-        # --- DataFrameの加工 (Excelの時と同じ処理) ---
+        # 日付と時間を結合してdatetimeオブジェクトを作成する
+        df['start_datetime'] = pd.to_datetime(df['日付'] + ' ' + df['開始時間'])
         
-        # start_datetimeの作成
-        df['start_datetime'] = pd.to_datetime(df['date'] + ' ' + df['start_time'])
-        
-        # end_datetimeの計算
+        # 予約終了時刻を計算して列に追加する
         def calculate_end_time(row):
-            duration_str = str(row.get('duration', '1時間'))
-            hours, minutes = 0, 0
-            if '時間' in duration_str:
-                parts = duration_str.split('時間')
-                try: hours = int(parts[0].strip())
-                except ValueError: hours = 0
-                if '分' in parts[1]:
-                    try: minutes = int(parts[1].replace('分', '').strip())
-                    except ValueError: minutes = 0
-            elif '分' in duration_str:
-                try: minutes = int(duration_str.replace('分', '').strip())
-                except ValueError: minutes = 0
-            else:
-                hours = 1 # デフォルト1時間
+            duration_str = row['長さ']
             
-            return row['start_datetime'] + timedelta(hours=hours, minutes=minutes)
-
+            if '分' in duration_str and '時間' not in duration_str:
+                minutes = int(duration_str.replace('分', '').strip())
+                return row['start_datetime'] + timedelta(minutes=minutes)
+            elif '時間30分' in duration_str:
+                hours = int(duration_str.split('時間')[0].strip())
+                return row['start_datetime'] + timedelta(hours=hours, minutes=30)
+            elif '時間' in duration_str:
+                hours = int(duration_str.replace('時間', '').strip())
+                return row['start_datetime'] + timedelta(hours=hours)
+            
+            return row['start_datetime'] + timedelta(hours=1) # デフォルト1時間
+            
         df['end_datetime'] = df.apply(calculate_end_time, axis=1)
-        
-        # 列名をExcelの時と合わせる（後方互換性のため）
-        df = df.rename(columns={
-            'reservation_target': '予約対象',
-            'date': '日付',
-            'start_time': '開始時間',
-            'duration': '長さ',
-            'created_at': '予約確定日時'
-        })
-        
         return df
-        
+
     except Exception as e:
-        st.error(f"🚨 予約データの読み込みエラー: {e}")
-        # エラー時は空のDFを返す
-        cols = ['予約対象', '日付', '開始時間', '長さ', '予約確定日時', 'start_datetime', 'end_datetime']
-        return pd.DataFrame(columns=cols)
+        st.error(f"🚨 予約台帳の読み込みエラーが発生しました。詳細: {e}")
+        # st.dataframe(df) # デバッグ用にDFを表示
+        st.stop()
 
 # --- 関数: データベースに追記 ---
-def append_reservation(target, date_str, time_str, duration_str, created_at_str):
-    """新しいデータをデータベースに INSERT (追記) する"""
+def append_and_save(new_df):
+    """新しいデータをデータベースに追記する"""
     try:
-        # 'with conn.session' を使うと自動的にトランザクションが管理される
-        with conn.session as s:
-            # SQLのINSERT文
-            # :variable_name の形式で、安全に値を挿入（SQLインジェクション対策）
-            s.execute(
-                f"""
-                INSERT INTO {TABLE_NAME} 
-                (reservation_target, date, start_time, duration, created_at) 
-                VALUES 
-                (:target, :date, :time, :duration, :created)
-                """,
-                params=dict(
-                    target=target,
-                    date=date_str,
-                    time=time_str,
-                    duration=duration_str,
-                    created=created_at_str
-                )
-            )
-            s.commit()
+        with conn.session as session:
+            for index, row in new_df.iterrows():
+                # データを辞書型に変換
+                reservation_data = {
+                    "target": row['予約対象'],
+                    "date": row['日付'],
+                    "time": row['開始時間'],
+                    "duration": row['長さ'],
+                    "now": row['予約確定日時']
+                }
+                
+                # パラメータ化クエリでSQLインジェクションを防止
+                session.execute(text(f"""
+                    INSERT INTO {TABLE_NAME} (予約対象, 日付, 開始時間, 長さ, 予約確定日時)
+                    VALUES (:target, :date, :time, :duration, :now)
+                """), reservation_data)
+            
+            session.commit()
             
         st.success("🎉 予約が確定し、データベースに保存されました！")
         st.balloons()
         
-        # 追記後のデータを表示
+        # 追記後にキャッシュをクリアして最新のデータを再読み込みさせる
+        st.cache_data.clear()
+        
+        # 追記されたデータ（最後の数件）を表示して確認
         st.subheader("📚 最新の予約データ (最終5件)")
-        latest_df = conn.query(f'SELECT reservation_target as 予約対象, date as 日付, start_time as 開始時間, duration as 長さ, created_at as 予約確定日時 FROM {TABLE_NAME} ORDER BY id DESC LIMIT 5', ttl=0)
-        st.dataframe(latest_df, hide_index=True, use_container_width=True)
+        updated_df = load_reservations()
+        st.dataframe(updated_df[['予約対象', '日付', '開始時間', '長さ']].tail(5), hide_index=True, use_container_width=True)
         
     except Exception as e:
-        st.error(f"❌ データベースへの書き込み中にエラーが発生しました。エラー詳細: {e}")
+        st.error(f"❌ データベースへの書き込み中にエラーが発生しました。詳細: {e}")
         st.stop()
         
 # --- メイン処理 ---
-st.title("📅 シンプル予約ツール (データベース版)")
+st.title("📅 シンプル予約ツール (DB接続版)")
 st.markdown("### ご希望の日時と予約対象を選択してください。")
-st.info("予約データはクラウド上のデータベースに安全に保存されます。")
+st.info(f"予約データはクラウドデータベース (テーブル名: `{TABLE_NAME}`) に保存されます。")
 
 # 既存の予約台帳を読み込む
 reservations_df = load_reservations()
@@ -198,6 +179,7 @@ st.write("---")
 # --- 予約内容の確認と確定 ---
 st.header("📝 予約内容の確認と確定")
 
+# 選択された内容を整形して表示
 st.markdown(f"""
 - **対象:** **{selected_target}**
 - **日付:** **{selected_date.strftime('%Y年%m月%d日')}**
@@ -212,45 +194,42 @@ if st.button("✅ 上記の内容で予約を確定する", type="primary"):
     try:
         target_start_dt = datetime.combine(selected_date, datetime.strptime(selected_time_str, '%H:%M').time())
         
-        # (ダブルブッキングチェック用の) 予約の長さをtimedeltaオブジェクトに変換
+        # 予約の長さをtimedeltaオブジェクトに変換
         duration_delta = timedelta()
-        hours, minutes = 0, 0
-        if '時間' in selected_duration:
-            parts = selected_duration.split('時間')
-            try: hours = int(parts[0].strip())
-            except ValueError: hours = 0
-            if '分' in parts[1]:
-                try: minutes = int(parts[1].replace('分', '').strip())
-                except ValueError: minutes = 0
-        elif '分' in selected_duration:
-            try: minutes = int(selected_duration.replace('分', '').strip())
-            except ValueError: minutes = 0
-        
-        duration_delta = timedelta(hours=hours, minutes=minutes)
-        if duration_delta.total_seconds() == 0:
-            duration_delta = timedelta(hours=1) # 万が一0分なら1時間にする
+        if '分' in selected_duration and '時間' not in selected_duration:
+            minutes = int(selected_duration.replace('分', '').strip())
+            duration_delta = timedelta(minutes=minutes)
+        elif '時間30分' in selected_duration:
+            hours = int(selected_duration.split('時間')[0].strip())
+            duration_delta = timedelta(hours=hours, minutes=30)
+        elif '時間' in selected_duration:
+            hours = int(selected_duration.replace('時間', '').strip())
+            duration_delta = timedelta(hours=hours)
+        else:
+            duration_delta = timedelta(hours=1) # フォールバック
 
         target_end_dt = target_start_dt + duration_delta
 
     except Exception as e:
-        st.error(f"🚨 日時の解析に失敗しました: {e}")
+        st.error(f"🚨 選択された日時の解析に失敗しました。: {e}")
         st.stop()
         
     # --- 2. ダブルブッキングチェックロジック ---
     is_booked = False
     
     # 同じ予約対象（部屋など）に絞り込む
-    if not reservations_df.empty:
-        target_reservations = reservations_df[reservations_df['予約対象'] == selected_target]
-    else:
-        target_reservations = pd.DataFrame()
+    target_reservations = reservations_df[reservations_df['予約対象'] == selected_target]
     
     # 予約が存在する場合のみチェック
     if not target_reservations.empty:
         for index, row in target_reservations.iterrows():
+            
+            # 既存予約の開始時刻と終了時刻
             existing_start = row['start_datetime']
             existing_end = row['end_datetime']
             
+            # 予約が重複しているかの判定ロジック
+            # (Aの開始 < Bの終了) かつ (Bの開始 < Aの終了)
             if (target_start_dt < existing_end) and (existing_start < target_end_dt):
                 is_booked = True
                 st.error(f"""
@@ -258,34 +237,34 @@ if st.button("✅ 上記の内容で予約を確定する", type="primary"):
                 選択された時間帯は既に予約済みです。
                 - **既存予約:** {row['start_datetime'].strftime('%Y/%m/%d %H:%M')} - {row['end_datetime'].strftime('%H:%M')}
                 """)
-                t.sleep(0.1)
+                t.sleep(0.1) # エラー表示のため
                 break
     
     # --- 3. 予約確定処理 ---
     if not is_booked:
-        # データベースに保存する文字列データ
-        date_str_to_db = selected_date.strftime('%Y-%m-%d')
-        time_str_to_db = selected_time_str
-        duration_str_to_db = selected_duration
-        created_at_str_to_db = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
+        # 新しい予約データをDataFrameとして作成
+        new_reservation_data = {
+            '予約対象': [selected_target],
+            '日付': [selected_date.strftime('%Y-%m-%d')],
+            '開始時間': [selected_time_str],
+            '長さ': [selected_duration],
+            '予約確定日時': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+        }
+        new_df = pd.DataFrame(new_reservation_data)
+        
         # 追記と保存を実行
-        append_reservation(
-            selected_target,
-            date_str_to_db,
-            time_str_to_db,
-            duration_str_to_db,
-            created_at_str_to_db
-        )
+        append_and_save(new_df)
+
 
 # --- 既存予約データの表示 (デバッグ/確認用) ---
 if not reservations_df.empty:
     st.markdown("---")
     st.subheader("📌 既存の全予約データ (確認用)")
-    st.dataframe(reservations_df[['予約対象', '日付', '開始時間', '長さ', '予約確定日時']], hide_index=True, use_container_width=True)
+    st.dataframe(reservations_df[['予約対象', '日付', '開始時間', '長さ']], hide_index=True, use_container_width=True)
+
 
 # --- フッター ---
 st.markdown("---")
-st.caption("powered by Streamlit & Turso (SQLite)")
+st.caption("powered by Streamlit & Turso")
 
 
