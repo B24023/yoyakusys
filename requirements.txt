@@ -1,0 +1,4 @@
+turso-client
+streamlit
+sqlalchemy
+pandas
