@@ -15,9 +15,9 @@ creds = service_account.Credentials.from_service_account_info(creds_dict)
 service = build('sheets', 'v4', credentials=creds)
 sheet = service.spreadsheets()
 
-st.title("📅 シンプル予約ツール（Google Sheets 版）")
+st.title("📅 シンプル予約ツール")
 
-target = st.selectbox("対象を選択", ["ミーティングルーム A", "ミーティングルーム B"])
+target = st.selectbox("対象を選択", ["座敷A", "座敷B"])
 date = st.date_input("日付を選択")
 start_time = st.time_input("開始時間")
 duration = st.selectbox("長さ", ["30分", "1時間", "2時間"])
@@ -36,5 +36,6 @@ if st.button("予約を確定"):
         valueInputOption="USER_ENTERED",
         body={"values": [new_row]}
     ).execute()
-    st.success("✅ Google Sheets に予約を記録しました！")
+    st.success("✅ 予約を確定しました！")
+
 
