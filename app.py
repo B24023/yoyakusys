@@ -4,7 +4,7 @@ from googleapiclient.discovery import build
 from datetime import datetime
 
 # Google Sheets 設定
-SPREADSHEET_ID = "あなたのスプレッドシートIDをここに"  # URLの /d/ と /edit の間の部分
+SPREADSHEET_ID = "1YHq6QSH1c4JY5Gv-7A4Oundgwr4TVLSUJPpZVYrvKk4"  # URLの /d/ と /edit の間の部分
 SHEET_NAME = "Sheet1"
 
 # Renderでは環境変数からJSONを読み込む
@@ -37,3 +37,4 @@ if st.button("予約を確定"):
         body={"values": [new_row]}
     ).execute()
     st.success("✅ Google Sheets に予約を記録しました！")
+
