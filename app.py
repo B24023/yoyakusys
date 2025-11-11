@@ -15,6 +15,12 @@ creds = service_account.Credentials.from_service_account_info(creds_dict)
 service = build('sheets', 'v4', credentials=creds)
 sheet = service.spreadsheets()
 
+st.sidebar.title("📋 メニュー")
+st.sidebar.markdown("### 操作メニュー")
+page = st.sidebar.radio("ページ選択", ["予約フォーム", "予約一覧"])
+
+st.sidebar.info("左のメニューからページを選択してください。")
+
 st.title("📅 シンプル予約ツール")
 
 target = st.selectbox("対象を選択", ["座敷A", "座敷B"])
@@ -37,6 +43,7 @@ if st.button("予約を確定"):
         body={"values": [new_row]}
     ).execute()
     st.success("✅ 予約を確定しました！")
+
 
 
 
