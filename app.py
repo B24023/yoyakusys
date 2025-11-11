@@ -45,5 +45,19 @@ if st.button("予約を確定"):
     st.success("✅ 予約を確定しました！")
 
 
+elif page == "予約一覧":
+    st.title("📖 予約一覧")
+    result = sheet.values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SHEET_NAME}!A:E"
+    ).execute()
+
+    values = result.get("values", [])
+    if not values:
+        st.warning("まだ予約データがありません。")
+    else:
+        st.dataframe(values, use_container_width=True)
+
+
 
 
