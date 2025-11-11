@@ -20,7 +20,7 @@ st.title("📅 シンプル予約ツール")
 target = st.selectbox("対象を選択", ["座敷A", "座敷B"])
 date = st.date_input("日付を選択")
 start_time = st.time_input("開始時間")
-duration = st.selectbox("長さ", ["30分", "1時間", "2時間"])
+duration = st.selectbox("利用時間", ["30分", "1時間", "2時間"])
 
 if st.button("予約を確定"):
     new_row = [
@@ -37,5 +37,6 @@ if st.button("予約を確定"):
         body={"values": [new_row]}
     ).execute()
     st.success("✅ 予約を確定しました！")
+
 
 
