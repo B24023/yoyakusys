@@ -15,11 +15,7 @@ creds = service_account.Credentials.from_service_account_info(creds_dict)
 service = build('sheets', 'v4', credentials=creds)
 sheet = service.spreadsheets()
 
-st.sidebar.title("📋 メニュー")
-st.sidebar.markdown("### 操作メニュー")
-page = st.sidebar.radio("ページ選択", ["予約フォーム", "予約一覧"])
 
-st.sidebar.info("左のメニューからページを選択してください。")
 
 st.title("📅 シンプル予約ツール")
 
@@ -45,18 +41,8 @@ if st.button("予約を確定"):
     st.success("✅ 予約を確定しました！")
 
 
-elif page == "予約一覧":
-    st.title("📖 予約一覧")
-    result = sheet.values().get(
-        spreadsheetId=SPREADSHEET_ID,
-        range=f"{SHEET_NAME}!A:E"
-    ).execute()
 
-    values = result.get("values", [])
-    if not values:
-        st.warning("まだ予約データがありません。")
-    else:
-        st.dataframe(values, use_container_width=True)
+
 
 
 
